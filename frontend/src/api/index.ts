@@ -1,0 +1,106 @@
+import axios from 'axios';
+import type { Book, Highlight, ImportLog, ImportSummary, InsightsSummary, RelatedHighlight, SparkHighlight, Summary, AIGenreRecommendation, Thought, AIGeneration } from '../types';
+
+export const api = axios.create({
+  baseURL: import.meta.env.VITE_API_URL ?? ''
+});
+
+export async function getHealth() {
+  const response = await api.get<{ status: string; app: string }>('/health');
+  return response.data;
+}
+
+export async function getSummary() {
+  const response = await api.get<Summary>('/api/summary');
+  return response.data;
+}
+
+export async function getInsights() {
+  const response = await api.get<InsightsSummary>('/api/insights');
+  return response.data;
+}
+
+export async function getAIRecommendations(refresh = false) {
+  const response = await api.get<AIGenreRecommendation[]>(`/api/insights/ai-recommendations?refresh=${refresh}`);
+  return response.data;
+}
+
+export async function getAIRecommendationsHistory() {
+  const response = await api.get<AIGeneration[]>('/api/insights/ai-recommendations/history');
+  return response.data;
+}
+
+export async function getBooks() {
+  const response = await api.get<Book[]>('/api/books');
+  return response.data;
+}
+
+export async function getBook(bookId: string) {
+  const response = await api.get<{ book: Book; highlights: Highlight[] }>(`/api/books/${bookId}`);
+  return response.data;
+}
+
+export async function getImports() {
+  const response = await api.get<ImportLog[]>('/api/imports');
+  return response.data;
+}
+
+export async function importDefaultClippings() {
+  const response = await api.post<ImportSummary>('/api/import/default');
+  return response.data;
+}
+
+export async function uploadClippings(file: File) {
+  const formData = new FormData();
+  formData.append('file', file);
+  const response = await api.post<ImportSummary>('/api/import/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  });
+  return response.data;
+}
+
+
+export async function getSpark() {
+  const response = await api.get<{ highlight: SparkHighlight | null }>('/api/spark');
+  return response.data;
+}
+
+export async function markSparkSeen(highlightId: string) {
+  const response = await api.post<{ id: string; last_seen_at?: string | null }>(`/api/highlights/${highlightId}/seen`);
+  return response.data;
+}
+
+export async function favoriteHighlight(highlightId: string) {
+  const response = await api.post<{ id: string; is_favorite: boolean }>(`/api/highlights/${highlightId}/favorite`);
+  return response.data;
+}
+
+export async function unfavoriteHighlight(highlightId: string) {
+  const response = await api.delete<{ id: string; is_favorite: boolean }>(`/api/highlights/${highlightId}/favorite`);
+  return response.data;
+}
+
+export async function hideHighlight(highlightId: string) {
+  const response = await api.post<{ id: string; is_hidden: boolean }>(`/api/highlights/${highlightId}/hidden`);
+  return response.data;
+}
+
+export async function getEmbeddingStatus() {
+  const response = await api.get<{ missing: number }>('/api/embeddings/status');
+  return response.data;
+}
+
+export async function backfillEmbeddings() {
+  const response = await api.post<{ processed: number; error?: string }>('/api/embeddings/backfill');
+  return response.data;
+}
+
+export async function getRelatedHighlights(highlightId: string) {
+  const response = await api.get<RelatedHighlight[]>(`/api/highlights/${highlightId}/related`);
+  return response.data;
+}
+
+export async function addThought(highlightId: string, content: string) {
+  const response = await api.post<Thought>(`/api/highlights/${highlightId}/thoughts`, { content });
+  return response.data;
+}

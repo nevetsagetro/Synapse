@@ -1,0 +1,205 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOCAL_NODE_BIN="$ROOT_DIR/.tools/node/bin"
+BACKEND_PORT="${BACKEND_PORT:-8000}"
+FRONTEND_PORT="${FRONTEND_PORT:-3000}"
+DEFAULT_CLIPPINGS_FILE="$ROOT_DIR/data/imports/My Clippings.txt"
+DEFAULT_OBSIDIAN_DIR="$ROOT_DIR/data/exports/obsidian"
+DEFAULT_DB_FILE="$ROOT_DIR/backend/synapse.db"
+DEFAULT_BACKUP_DIR="$ROOT_DIR/data/backups"
+
+if [ -d "$LOCAL_NODE_BIN" ]; then
+  export PATH="$LOCAL_NODE_BIN:$PATH"
+fi
+
+ensure_backend_env() {
+  if [ ! -d "$ROOT_DIR/.venv" ]; then
+    echo "Backend environment missing. Run ./setup.sh first."
+    exit 1
+  fi
+}
+
+ensure_frontend_env() {
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "npm was not found. Install Node.js 18+ to run the frontend."
+    exit 1
+  fi
+
+  if [ ! -d "$ROOT_DIR/frontend/node_modules" ]; then
+    echo "Frontend dependencies are missing. Run ./setup.sh after installing Node.js 18+."
+    exit 1
+  fi
+}
+
+resolve_path() {
+  case "$1" in
+    /*) printf '%s\n' "$1" ;;
+    *) printf '%s\n' "$ROOT_DIR/$1" ;;
+  esac
+}
+
+backup_db() {
+  mkdir -p "$DEFAULT_BACKUP_DIR"
+  if [ -f "$DEFAULT_DB_FILE" ]; then
+    BACKUP_FILE="$DEFAULT_BACKUP_DIR/synapse-$(date +%Y%m%d-%H%M%S).db"
+    cp "$DEFAULT_DB_FILE" "$BACKUP_FILE"
+    echo "backup=$BACKUP_FILE"
+  else
+    echo "backup=none"
+  fi
+}
+
+ensure_server_not_running() {
+  if command -v pgrep >/dev/null 2>&1 && pgrep -f "uvicorn app.main:app" >/dev/null 2>&1; then
+    echo "Synapse server appears to be running. Stop it before resetting or rebuilding the database."
+    exit 1
+  fi
+}
+
+run_backend_dev() {
+  cd "$ROOT_DIR/backend"
+  . "$ROOT_DIR/.venv/bin/activate"
+  uvicorn app.main:app --host 127.0.0.1 --port "$BACKEND_PORT" --reload
+}
+
+run_frontend_dev() {
+  cd "$ROOT_DIR/frontend"
+  npm run dev -- --host 127.0.0.1 --port "$FRONTEND_PORT"
+}
+
+case "${1:-}" in
+  dev)
+    ensure_backend_env
+    ensure_frontend_env
+    trap 'kill 0' EXIT
+    run_backend_dev &
+    run_frontend_dev &
+    wait
+    ;;
+  start)
+    ensure_backend_env
+    if command -v npm >/dev/null 2>&1; then
+      cd "$ROOT_DIR/frontend"
+      if [ ! -d node_modules ]; then
+        npm install
+      fi
+      npm run build
+    else
+      echo "npm was not found; starting API only. Install Node.js 18+ to build the frontend."
+    fi
+
+    cd "$ROOT_DIR/backend"
+    . "$ROOT_DIR/.venv/bin/activate"
+    uvicorn app.main:app --host 127.0.0.1 --port "$BACKEND_PORT"
+    ;;
+  test)
+    ensure_backend_env
+    cd "$ROOT_DIR/backend"
+    . "$ROOT_DIR/.venv/bin/activate"
+    pytest
+
+    if command -v npm >/dev/null 2>&1; then
+      cd "$ROOT_DIR/frontend"
+      if [ -d node_modules ]; then
+        npm test
+      else
+        echo "Skipping frontend tests because node_modules is missing."
+      fi
+    else
+      echo "Skipping frontend tests because npm is not installed."
+    fi
+    ;;
+  parse)
+    ensure_backend_env
+    INPUT_FILE="$(resolve_path "${2:-$DEFAULT_CLIPPINGS_FILE}")"
+    cd "$ROOT_DIR/backend"
+    . "$ROOT_DIR/.venv/bin/activate"
+    python -m app.services.clippings_parser --input "$INPUT_FILE" --stats
+    ;;
+  import-clippings)
+    ensure_backend_env
+    INPUT_FILE="$(resolve_path "${2:-$DEFAULT_CLIPPINGS_FILE}")"
+    cd "$ROOT_DIR/backend"
+    . "$ROOT_DIR/.venv/bin/activate"
+    python -m app.services.importer --input "$INPUT_FILE"
+    ;;
+  merge-duplicates)
+    ensure_backend_env
+    cd "$ROOT_DIR/backend"
+    . "$ROOT_DIR/.venv/bin/activate"
+    python - <<'PY'
+from sqlmodel import Session
+
+from app.database import engine, init_db
+from app.services.importer import merge_duplicate_books
+
+init_db()
+with Session(engine) as session:
+    summary = merge_duplicate_books(session)
+
+print(
+    f"books_merged={summary.books_merged} "
+    f"highlights_moved={summary.highlights_moved} "
+    f"duplicate_highlights_removed={summary.duplicate_highlights_removed}"
+)
+PY
+    ;;
+  backup-db)
+    backup_db
+    ;;
+  reset-db)
+    ensure_server_not_running
+    backup_db
+    rm -f "$DEFAULT_DB_FILE"
+    echo "reset=ok db=$DEFAULT_DB_FILE"
+    ;;
+  rebuild-db)
+    ensure_backend_env
+    ensure_server_not_running
+    INPUT_FILE="$(resolve_path "${2:-$DEFAULT_CLIPPINGS_FILE}")"
+    backup_db
+    rm -f "$DEFAULT_DB_FILE"
+    cd "$ROOT_DIR/backend"
+    . "$ROOT_DIR/.venv/bin/activate"
+    python -m app.services.importer --input "$INPUT_FILE"
+    python - <<'PY'
+from sqlmodel import Session
+
+from app.database import engine, init_db
+from app.services.importer import merge_duplicate_books
+
+init_db()
+with Session(engine) as session:
+    summary = merge_duplicate_books(session)
+
+print(
+    f"books_merged={summary.books_merged} "
+    f"highlights_moved={summary.highlights_moved} "
+    f"duplicate_highlights_removed={summary.duplicate_highlights_removed}"
+)
+PY
+    ;;
+  export-obsidian)
+    ensure_backend_env
+    OUTPUT_DIR="$(resolve_path "${2:-$DEFAULT_OBSIDIAN_DIR}")"
+    mkdir -p "$OUTPUT_DIR"
+    cd "$ROOT_DIR/backend"
+    . "$ROOT_DIR/.venv/bin/activate"
+    python -m app.services.obsidian_export --output "$OUTPUT_DIR"
+    ;;
+  export-obsidian-file)
+    ensure_backend_env
+    INPUT_FILE="$(resolve_path "${2:-$DEFAULT_CLIPPINGS_FILE}")"
+    OUTPUT_DIR="$(resolve_path "${3:-$DEFAULT_OBSIDIAN_DIR}")"
+    mkdir -p "$OUTPUT_DIR"
+    cd "$ROOT_DIR/backend"
+    . "$ROOT_DIR/.venv/bin/activate"
+    python -m app.services.obsidian_export --input "$INPUT_FILE" --output "$OUTPUT_DIR"
+    ;;
+  *)
+    echo "Usage: ./synapse {dev|start|test|parse|import-clippings|merge-duplicates|backup-db|reset-db|rebuild-db|export-obsidian|export-obsidian-file}"
+    exit 1
+    ;;
+esac

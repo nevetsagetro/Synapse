@@ -1,0 +1,21 @@
+==========
+Atomic Habits (James Clear)
+- Your Highlight on page 45 | Location 689-691 | Added on Monday, March 3, 2025
+
+You do not rise to the level of your goals. You fall to the level of your systems.
+==========
+Deep Work (Cal Newport)
+- Your Note on page 12 | Location 142 | Added on Monday, March 3, 2025 10:45:00 PM
+
+Remember to connect this with attention residue.
+==========
+Book Without Author
+- Your Highlight at location 88 | Added on March 4, 2025
+
+A small useful highlight.
+==========
+Strange Encoding (Example)
+- Your Highlight on page 2 | Location 20-21 | Added on 04 March 2025 22:45
+
+Text with null-like spacing.
+==========
