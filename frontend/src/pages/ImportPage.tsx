@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { FileText, RefreshCw, Upload, Sparkles } from 'lucide-react';
-import { getImports, getSummary, importDefaultClippings, uploadClippings, backfillEmbeddings, getEmbeddingStatus } from '../api';
+import { FileText, RefreshCw, Upload, Sparkles, CloudDownload } from 'lucide-react';
+import { getImports, getSummary, importDefaultClippings, uploadClippings, backfillEmbeddings, getEmbeddingStatus, importKindleNotebook } from '../api';
 import type { ImportLog, ImportSummary, Summary } from '../types';
 
 export default function ImportPage() {
@@ -70,6 +70,29 @@ export default function ImportPage() {
     }
   }
 
+  async function runKindleNotebookImport() {
+    setBusy('kindle-notebook');
+    setError(null);
+    setImportResult(null);
+    try {
+      // We pass headed=false, resetSession=false for background syncing
+      const result = await importKindleNotebook(false, false);
+      setImportResult(result);
+      await refresh();
+      await fetchEmbeddingStatus();
+    } catch (err) {
+      // Special handling if the scraper needs authentication
+      const errMsg = readError(err);
+      if (errMsg.includes("No saved Amazon session found")) {
+        setError("You need to log into Amazon first. Run the scraper manually in your terminal once: python -m scripts.scrape_kindle_notebook");
+      } else {
+        setError(errMsg);
+      }
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function runBackfill() {
     setBusy('backfill');
     setEmbeddingError(null);
@@ -104,37 +127,59 @@ export default function ImportPage() {
         <Metric label="Imports" value={summary?.imports ?? 0} />
       </div>
 
-      <div className="space-y-3 rounded border border-slate-800 bg-slate-900 p-4">
-        <label className="block">
-          <span className="mb-2 block text-sm font-medium text-slate-200">My Clippings.txt</span>
-          <input
-            type="file"
-            accept=".txt,text/plain"
-            onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
-            className="block w-full rounded border border-slate-700 bg-slate-950 p-2 text-sm text-slate-300 file:mr-3 file:rounded file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-slate-950"
-          />
-        </label>
-        <button
-          type="button"
-          onClick={runUploadImport}
-          disabled={busy !== null}
-          className="inline-flex h-11 items-center gap-2 rounded bg-amber-500 px-4 text-sm font-semibold text-slate-950 transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {busy === 'upload' ? <RefreshCw size={17} className="animate-spin" /> : <Upload size={17} />}
-          Upload and import
-        </button>
-      </div>
+      <div className="grid gap-4 md:grid-cols-2">
+        {/* Amazon Sync Card */}
+        <div className="space-y-3 rounded border border-slate-800 bg-slate-900 p-5">
+          <h2 className="text-lg font-semibold flex items-center gap-2 text-slate-100">
+            <CloudDownload size={20} className="text-sky-400" />
+            Sync from Amazon
+          </h2>
+          <p className="text-sm text-slate-400 mb-4 h-10">
+            Automatically download your latest highlights directly from your Kindle Notebook.
+          </p>
+          <button
+            type="button"
+            onClick={runKindleNotebookImport}
+            disabled={busy !== null}
+            className="inline-flex h-11 w-full justify-center items-center gap-2 rounded bg-sky-600 px-4 text-sm font-semibold text-slate-50 transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {busy === 'kindle-notebook' ? <RefreshCw size={17} className="animate-spin" /> : <RefreshCw size={17} />}
+            Sync Notebook
+          </button>
+        </div>
 
-      <div className="flex flex-wrap gap-3">
-        <button
-          type="button"
-          onClick={runImport}
-          disabled={busy !== null}
-          className="inline-flex h-11 items-center gap-2 rounded bg-slate-800 px-4 text-sm font-semibold text-slate-100 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {busy === 'import' ? <RefreshCw size={17} className="animate-spin" /> : <Upload size={17} />}
-          Import default file
-        </button>
+        {/* File Upload Card */}
+        <div className="space-y-3 rounded border border-slate-800 bg-slate-900 p-5">
+          <h2 className="text-lg font-semibold flex items-center gap-2 text-slate-100">
+            <FileText size={20} className="text-amber-400" />
+            Upload File
+          </h2>
+          <p className="text-sm text-slate-400 mb-4 h-10">
+            Import offline highlights using a My Clippings.txt file from your device.
+          </p>
+          <div className="flex gap-2">
+            <label className="flex-1 cursor-pointer">
+              <input
+                type="file"
+                accept=".txt,text/plain"
+                onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
+                className="hidden"
+              />
+              <div className="flex h-11 items-center justify-center rounded border border-slate-700 bg-slate-950 px-3 text-sm text-slate-300 hover:bg-slate-800 transition">
+                {selectedFile ? selectedFile.name : 'Choose .txt file'}
+              </div>
+            </label>
+            <button
+              type="button"
+              onClick={runUploadImport}
+              disabled={busy !== null || !selectedFile}
+              className="inline-flex h-11 items-center gap-2 rounded bg-amber-500 px-4 text-sm font-semibold text-slate-950 transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {busy === 'upload' ? <RefreshCw size={17} className="animate-spin" /> : <Upload size={17} />}
+              Import
+            </button>
+          </div>
+        </div>
       </div>
 
       {importResult ? (

@@ -59,6 +59,14 @@ export async function uploadClippings(file: File) {
   return response.data;
 }
 
+export async function importKindleNotebook(headed: boolean = false, resetSession: boolean = false) {
+  const response = await api.post<ImportSummary>('/api/import/kindle-notebook', { 
+    headed, 
+    reset_session: resetSession 
+  });
+  return response.data;
+}
+
 
 export async function getSpark() {
   const response = await api.get<{ highlight: SparkHighlight | null }>('/api/spark');
