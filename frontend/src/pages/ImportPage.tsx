@@ -81,13 +81,7 @@ export default function ImportPage() {
       await refresh();
       await fetchEmbeddingStatus();
     } catch (err) {
-      // Special handling if the scraper needs authentication
-      const errMsg = readError(err);
-      if (errMsg.includes("No saved Amazon session found")) {
-        setError("You need to log into Amazon first. Run the scraper manually in your terminal once: python -m scripts.scrape_kindle_notebook");
-      } else {
-        setError(errMsg);
-      }
+      setError(readError(err));
     } finally {
       setBusy(null);
     }

@@ -267,16 +267,6 @@ async def import_kindle_notebook(
             ),
         ) from exc
 
-    if not req.headed and not req.reset_session and not SESSION_FILE.exists():
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "No saved Amazon session found. "
-                "Call with headed=true to open the browser and log in, "
-                "or run the CLI: python -m scripts.scrape_kindle_notebook"
-            ),
-        )
-
     def _run() -> dict:
         records = scrape_highlights(headed=req.headed, reset_session=req.reset_session)
         if not records:
