@@ -3,6 +3,29 @@ import { useParams } from 'react-router-dom';
 import { getBook } from '../api';
 import type { Book, Highlight } from '../types';
 
+const SOURCE_LABELS: Record<string, { label: string; className: string }> = {
+  my_clippings: {
+    label: 'Kindle Clippings',
+    className: 'bg-amber-900/40 text-amber-300 border border-amber-800/50',
+  },
+  kindle_notebook: {
+    label: 'Kindle Notebook',
+    className: 'bg-sky-900/40 text-sky-300 border border-sky-800/50',
+  },
+};
+
+function SourceBadge({ source }: { source: string }) {
+  const config = SOURCE_LABELS[source] ?? {
+    label: source,
+    className: 'bg-slate-800 text-slate-400 border border-slate-700',
+  };
+  return (
+    <span className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${config.className}`}>
+      {config.label}
+    </span>
+  );
+}
+
 export default function BookPage() {
   const { bookId } = useParams();
   const [book, setBook] = useState<Book | null>(null);
@@ -40,7 +63,8 @@ export default function BookPage() {
                 <p className="text-slate-400">Note</p>
               )}
               {highlight.note ? <p className="mt-4 text-sm text-amber-100">Note: {highlight.note}</p> : null}
-              <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-400">
+              <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                <SourceBadge source={highlight.source} />
                 {highlight.page ? <span>Page {highlight.page}</span> : null}
                 {highlight.location_start ? (
                   <span>

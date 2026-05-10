@@ -136,8 +136,14 @@ def _get_or_create_book(session: Session, record: ParsedClipping, now: datetime)
 
     books = session.exec(select(Book)).all()
     for book in books:
-        if _normalize_identity(book.title) == normalized_title and _normalize_identity(book.author or "") == normalized_author:
-            return book, False
+        if _normalize_identity(book.title) == normalized_title:
+            db_author = _normalize_identity(book.author or "")
+            if not db_author or not normalized_author or db_author == normalized_author:
+                # Update author if missing in db
+                if not book.author and record.author:
+                    book.author = record.author
+                    session.add(book)
+                return book, False
 
     book = Book(
         title=record.book_title,
@@ -161,10 +167,28 @@ def merge_duplicate_books(session: Session) -> MergeSummary:
     duplicate_highlights_removed = 0
 
     for book in books:
-        key = (_normalize_identity(book.title), _normalize_identity(book.author or ""))
-        canonical = canonical_by_key.get(key)
+        # Group by title first. We merge if titles match and authors don't strictly conflict
+        title_key = _normalize_identity(book.title)
+        
+        # Find if we already have a canonical book for this title
+        canonical = None
+        for (c_title, c_author), c_book in canonical_by_key.items():
+            if c_title == title_key:
+                # Same title. Do authors conflict?
+                b_author = _normalize_identity(book.author or "")
+                if not c_author or not b_author or c_author == b_author:
+                    canonical = c_book
+                    # Update canonical author if missing
+                    if not canonical.author and book.author:
+                        canonical.author = book.author
+                        # Update the key with the new author
+                        del canonical_by_key[(c_title, c_author)]
+                        canonical_by_key[(c_title, _normalize_identity(book.author))] = canonical
+                    break
+
         if canonical is None:
-            canonical_by_key[key] = book
+            # First time seeing this title/author combo
+            canonical_by_key[(title_key, _normalize_identity(book.author or ""))] = book
             continue
 
         highlights = session.exec(select(Highlight).where(Highlight.book_id == book.id)).all()

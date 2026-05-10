@@ -1,3 +1,4 @@
+from pydantic import BaseModel
 from contextlib import asynccontextmanager
 import csv
 import io
@@ -229,6 +230,74 @@ async def import_upload(file: UploadFile, session: Session = Depends(get_session
     }
 
 
+
+class KindleNotebookImportRequest(BaseModel):
+    headed: bool = False
+    reset_session: bool = False
+
+
+@app.post("/api/import/kindle-notebook")
+async def import_kindle_notebook(
+    req: KindleNotebookImportRequest = KindleNotebookImportRequest(),
+    session: Session = Depends(get_session),
+) -> dict[str, str | int | None]:
+    """
+    Scrape highlights from read.amazon.com/notebook and import them.
+
+    First call: opens a visible browser and waits for manual Amazon login.
+    Subsequent calls: reuses the saved session (~/.synapse/kindle_session.json).
+
+    Pass `headed: true` to always open the browser window.
+    Pass `reset_session: true` to delete the saved session and force re-login.
+    """
+    import asyncio
+
+    try:
+        from scripts.scrape_kindle_notebook import (
+            scrape_highlights,
+            import_kindle_highlights,
+            SESSION_FILE,
+        )
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Playwright is not installed. "
+                "Run: pip install playwright && playwright install chromium"
+            ),
+        ) from exc
+
+    if not req.headed and not req.reset_session and not SESSION_FILE.exists():
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "No saved Amazon session found. "
+                "Call with headed=true to open the browser and log in, "
+                "or run the CLI: python -m scripts.scrape_kindle_notebook"
+            ),
+        )
+
+    def _run() -> dict:
+        records = scrape_highlights(headed=req.headed, reset_session=req.reset_session)
+        if not records:
+            return {
+                "source": "kindle_notebook",
+                "records_seen": 0,
+                "records_created": 0,
+                "records_skipped": 0,
+                "records_failed": 0,
+                "books_created": 0,
+                "import_log_id": None,
+            }
+        return import_kindle_highlights(records)
+
+
+    try:
+        result = await asyncio.to_thread(_run)
+    except SystemExit as exc:
+        raise HTTPException(status_code=500, detail="Scraper exited unexpectedly — check server logs.") from exc
+
+    return result
 
 
 @app.get("/api/spark")

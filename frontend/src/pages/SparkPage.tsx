@@ -3,6 +3,29 @@ import { Copy, Eye, EyeOff, RefreshCw, Star, Sparkles, Send } from 'lucide-react
 import { favoriteHighlight, getSpark, hideHighlight, markSparkSeen, unfavoriteHighlight, getRelatedHighlights, addThought } from '../api';
 import type { SparkHighlight, RelatedHighlight, Thought } from '../types';
 
+const SOURCE_LABELS: Record<string, { label: string; className: string }> = {
+  my_clippings: {
+    label: 'Kindle Clippings',
+    className: 'bg-amber-900/40 text-amber-300 border border-amber-800/50',
+  },
+  kindle_notebook: {
+    label: 'Kindle Notebook',
+    className: 'bg-sky-900/40 text-sky-300 border border-sky-800/50',
+  },
+};
+
+function SourceBadge({ source }: { source: string }) {
+  const config = SOURCE_LABELS[source] ?? {
+    label: source,
+    className: 'bg-slate-800 text-slate-400 border border-slate-700',
+  };
+  return (
+    <span className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${config.className}`}>
+      {config.label}
+    </span>
+  );
+}
+
 export default function SparkPage() {
   const [highlight, setHighlight] = useState<SparkHighlight | null>(null);
   const [loading, setLoading] = useState(true);
@@ -72,6 +95,13 @@ export default function SparkPage() {
     for (const paragraph of textToQuote.split('\n')) {
       lines.push(`> ${paragraph}`);
     }
+
+    // Source attribution line
+    const sourceLabel = SOURCE_LABELS[(highlight as any).source]?.label ?? (highlight as any).source;
+    if (sourceLabel) {
+      lines.push(`> `);
+      lines.push(`> — *${sourceLabel}*`);
+    }
     
     navigator.clipboard.writeText(lines.join('\n')).then(() => {
       setMessage('Copied Obsidian format to clipboard.');
@@ -127,9 +157,12 @@ export default function SparkPage() {
               {highlight.book_title}
               {highlight.author ? ` · ${highlight.author}` : ''}
             </p>
-            {highlight.quoted_at ? (
-              <p className="mt-2 text-xs text-slate-500">Quoted {highlight.quoted_at.slice(0, 10)}</p>
-            ) : null}
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              {(highlight as any).source && <SourceBadge source={(highlight as any).source} />}
+              {highlight.quoted_at ? (
+                <p className="text-xs text-slate-500">Quoted {highlight.quoted_at.slice(0, 10)}</p>
+              ) : null}
+            </div>
             <div className="mt-5 flex flex-wrap gap-2">
               <button
                 type="button"
