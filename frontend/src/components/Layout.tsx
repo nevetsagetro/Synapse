@@ -1,11 +1,13 @@
 import { useState } from 'react';
-import { BarChart3, BookOpen, Flame, Import, Library, Power } from 'lucide-react';
+import { BarChart3, BookOpen, Flame, Import, Library, Power, Search, Star } from 'lucide-react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { shutdownSynapse } from '../api';
 
 const links = [
   { to: '/spark', label: 'Spark', icon: Flame },
   { to: '/library', label: 'Library', icon: Library },
+  { to: '/search', label: 'Search', icon: Search },
+  { to: '/favorites', label: 'Favorites', icon: Star },
   { to: '/import', label: 'Import', icon: Import },
   { to: '/insights', label: 'Insights', icon: BarChart3 }
 ];

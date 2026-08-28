@@ -27,6 +27,7 @@ from app.services.ai_recommendations import get_ai_book_recommendations
 from app.services.embeddings import backfill_embeddings, get_related_highlights
 from app.services.importer import import_clippings_file
 from app.services.insights import get_insights_summary
+from app.services.search import search_highlights
 from app.services.spark import mark_highlight_seen, select_daily_spark, set_highlight_favorite, set_highlight_hidden
 
 settings = get_settings()
@@ -161,6 +162,8 @@ def book_detail(book_id: UUID, session: Session = Depends(get_session)) -> dict[
             "location_end": highlight.location_end,
             "date_added": highlight.date_added.isoformat() if highlight.date_added else None,
             "source": highlight.source,
+            "is_favorite": highlight.is_favorite,
+            "is_hidden": highlight.is_hidden,
             "thoughts": [{"id": str(t.id), "content": t.content, "created_at": t.created_at.isoformat()} for t in thoughts]
         })
 
@@ -303,6 +306,25 @@ async def import_kindle_notebook(
     return result
 
 
+def _serialize_highlight_with_book(highlight: Highlight, book: Book | None) -> dict[str, object]:
+    return {
+        "id": str(highlight.id),
+        "book_id": str(highlight.book_id),
+        "content": highlight.content,
+        "note": highlight.note,
+        "page": highlight.page,
+        "location_start": highlight.location_start,
+        "location_end": highlight.location_end,
+        "date_added": highlight.date_added.isoformat() if highlight.date_added else None,
+        "quoted_at": highlight.date_added.isoformat() if highlight.date_added else None,
+        "source": highlight.source,
+        "book_title": book.title if book else "Unknown",
+        "author": book.author if book else None,
+        "is_favorite": highlight.is_favorite,
+        "is_hidden": highlight.is_hidden,
+    }
+
+
 @app.get("/api/spark")
 def spark(session: Session = Depends(get_session)) -> dict[str, object | None]:
     item = select_daily_spark(session)
@@ -311,9 +333,9 @@ def spark(session: Session = Depends(get_session)) -> dict[str, object | None]:
 
     highlight = item.highlight
     book = item.book
-    
+
     thoughts = session.exec(select(Thought).where(Thought.highlight_id == highlight.id).order_by(Thought.created_at.asc())).all()
-    
+
     return {
         "highlight": {
             "id": str(highlight.id),
@@ -325,6 +347,7 @@ def spark(session: Session = Depends(get_session)) -> dict[str, object | None]:
             "quoted_at": highlight.date_added.isoformat() if highlight.date_added else None,
             "book_title": book.title if book else "Unknown",
             "author": book.author if book else None,
+            "source": highlight.source,
             "is_favorite": highlight.is_favorite,
             "is_hidden": highlight.is_hidden,
             "last_seen_at": highlight.last_seen_at.isoformat() if highlight.last_seen_at else None,
@@ -363,6 +386,36 @@ def hide_highlight(highlight_id: UUID, session: Session = Depends(get_session)) 
     if not highlight:
         raise HTTPException(status_code=404, detail="Highlight not found")
     return {"id": str(highlight.id), "is_hidden": highlight.is_hidden}
+
+
+@app.delete("/api/highlights/{highlight_id}/hidden")
+def unhide_highlight(highlight_id: UUID, session: Session = Depends(get_session)) -> dict[str, str | bool]:
+    highlight = set_highlight_hidden(session, highlight_id, False)
+    if not highlight:
+        raise HTTPException(status_code=404, detail="Highlight not found")
+    return {"id": str(highlight.id), "is_hidden": highlight.is_hidden}
+
+
+@app.get("/api/highlights/favorites")
+def favorite_highlights(session: Session = Depends(get_session)) -> list[dict[str, object]]:
+    highlights = session.exec(
+        select(Highlight).where(Highlight.is_favorite == True).order_by(Highlight.updated_at.desc())  # noqa: E712
+    ).all()
+    return [_serialize_highlight_with_book(h, session.get(Book, h.book_id)) for h in highlights]
+
+
+@app.get("/api/highlights/hidden")
+def hidden_highlights(session: Session = Depends(get_session)) -> list[dict[str, object]]:
+    highlights = session.exec(
+        select(Highlight).where(Highlight.is_hidden == True).order_by(Highlight.updated_at.desc())  # noqa: E712
+    ).all()
+    return [_serialize_highlight_with_book(h, session.get(Book, h.book_id)) for h in highlights]
+
+
+@app.get("/api/highlights/search")
+def highlights_search(q: str = "", session: Session = Depends(get_session)) -> list[dict[str, object]]:
+    highlights = search_highlights(session, q)
+    return [_serialize_highlight_with_book(h, session.get(Book, h.book_id)) for h in highlights]
 
 
 @app.get("/api/embeddings/status")

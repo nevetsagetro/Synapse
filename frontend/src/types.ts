@@ -18,6 +18,8 @@ export type Highlight = {
   location_end?: number | null;
   date_added?: string | null;
   source: string;
+  is_favorite: boolean;
+  is_hidden: boolean;
   thoughts?: Thought[];
 };
 
@@ -38,6 +40,23 @@ export type RelatedHighlight = {
   quoted_at?: string | null;
   source: string;
   book_title: string;
+};
+
+export type HighlightWithBook = {
+  id: string;
+  book_id: string;
+  content: string;
+  note?: string | null;
+  page?: number | null;
+  location_start?: number | null;
+  location_end?: number | null;
+  date_added?: string | null;
+  quoted_at?: string | null;
+  source: string;
+  book_title: string;
+  author?: string | null;
+  is_favorite: boolean;
+  is_hidden: boolean;
 };
 
 export type Summary = {

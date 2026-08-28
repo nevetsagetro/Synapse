@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Book, Highlight, ImportLog, ImportSummary, InsightsSummary, RelatedHighlight, SparkHighlight, Summary, AIGenreRecommendation, Thought, AIGeneration } from '../types';
+import type { Book, Highlight, HighlightWithBook, ImportLog, ImportSummary, InsightsSummary, RelatedHighlight, SparkHighlight, Summary, AIGenreRecommendation, Thought, AIGeneration } from '../types';
 
 export const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL ?? ''
@@ -95,6 +95,26 @@ export async function unfavoriteHighlight(highlightId: string) {
 
 export async function hideHighlight(highlightId: string) {
   const response = await api.post<{ id: string; is_hidden: boolean }>(`/api/highlights/${highlightId}/hidden`);
+  return response.data;
+}
+
+export async function unhideHighlight(highlightId: string) {
+  const response = await api.delete<{ id: string; is_hidden: boolean }>(`/api/highlights/${highlightId}/hidden`);
+  return response.data;
+}
+
+export async function getFavoriteHighlights() {
+  const response = await api.get<HighlightWithBook[]>('/api/highlights/favorites');
+  return response.data;
+}
+
+export async function getHiddenHighlights() {
+  const response = await api.get<HighlightWithBook[]>('/api/highlights/hidden');
+  return response.data;
+}
+
+export async function searchHighlights(query: string) {
+  const response = await api.get<HighlightWithBook[]>('/api/highlights/search', { params: { q: query } });
   return response.data;
 }
 

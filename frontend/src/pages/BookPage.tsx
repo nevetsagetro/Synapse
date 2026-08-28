@@ -1,30 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { getBook } from '../api';
+import { favoriteHighlight, getBook, hideHighlight, unfavoriteHighlight, unhideHighlight } from '../api';
 import type { Book, Highlight } from '../types';
-
-const SOURCE_LABELS: Record<string, { label: string; className: string }> = {
-  my_clippings: {
-    label: 'Kindle Clippings',
-    className: 'bg-amber-900/40 text-amber-300 border border-amber-800/50',
-  },
-  kindle_notebook: {
-    label: 'Kindle Notebook',
-    className: 'bg-sky-900/40 text-sky-300 border border-sky-800/50',
-  },
-};
-
-function SourceBadge({ source }: { source: string }) {
-  const config = SOURCE_LABELS[source] ?? {
-    label: source,
-    className: 'bg-slate-800 text-slate-400 border border-slate-700',
-  };
-  return (
-    <span className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${config.className}`}>
-      {config.label}
-    </span>
-  );
-}
+import HighlightCard from '../components/HighlightCard';
 
 export default function BookPage() {
   const { bookId } = useParams();
@@ -42,13 +20,32 @@ export default function BookPage() {
       .catch((err) => setError(err instanceof Error ? err.message : 'Could not load book.'));
   }, [bookId]);
 
+  async function toggleFavorite(highlight: Highlight) {
+    const updated = highlight.is_favorite ? await unfavoriteHighlight(highlight.id) : await favoriteHighlight(highlight.id);
+    setHighlights((prev) => prev.map((h) => (h.id === highlight.id ? { ...h, is_favorite: updated.is_favorite } : h)));
+  }
+
+  async function toggleHidden(highlight: Highlight) {
+    const updated = highlight.is_hidden ? await unhideHighlight(highlight.id) : await hideHighlight(highlight.id);
+    setHighlights((prev) => prev.map((h) => (h.id === highlight.id ? { ...h, is_hidden: updated.is_hidden } : h)));
+  }
+
   return (
     <section className="space-y-6">
       <p className="text-sm uppercase tracking-wide text-amber-400">Book</p>
       {error ? <div className="rounded border border-red-800 bg-red-950 p-4 text-sm text-red-100">{error}</div> : null}
-      <div className="space-y-2">
-        <h1 className="text-3xl font-semibold">{book?.title ?? 'Book details'}</h1>
-        <p className="text-slate-400">{book?.author ?? 'Unknown author'}</p>
+      <div className="flex items-center gap-4">
+        {book?.cover_url ? (
+          <img
+            src={book.cover_url}
+            alt=""
+            className="h-24 w-16 shrink-0 rounded object-cover shadow"
+          />
+        ) : null}
+        <div className="space-y-2">
+          <h1 className="text-3xl font-semibold">{book?.title ?? 'Book details'}</h1>
+          <p className="text-slate-400">{book?.author ?? 'Unknown author'}</p>
+        </div>
       </div>
 
       <div className="space-y-4">
@@ -56,27 +53,12 @@ export default function BookPage() {
           <div className="rounded border border-slate-800 bg-slate-900 p-6 text-slate-400">No highlights found.</div>
         ) : (
           highlights.map((highlight) => (
-            <article key={highlight.id} className="rounded border border-slate-800 bg-slate-900 p-5">
-              {highlight.content ? (
-                <blockquote className="font-serif text-xl leading-relaxed text-slate-100">{highlight.content}</blockquote>
-              ) : (
-                <p className="text-slate-400">Note</p>
-              )}
-              {highlight.note ? <p className="mt-4 text-sm text-amber-100">Note: {highlight.note}</p> : null}
-              <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-slate-400">
-                <SourceBadge source={highlight.source} />
-                {highlight.page ? <span>Page {highlight.page}</span> : null}
-                {highlight.location_start ? (
-                  <span>
-                    Location {highlight.location_start}
-                    {highlight.location_end && highlight.location_end !== highlight.location_start
-                      ? `-${highlight.location_end}`
-                      : ''}
-                  </span>
-                ) : null}
-                {highlight.date_added ? <span>Quoted {highlight.date_added.slice(0, 10)}</span> : null}
-              </div>
-            </article>
+            <HighlightCard
+              key={highlight.id}
+              highlight={highlight}
+              onToggleFavorite={() => toggleFavorite(highlight)}
+              onToggleHidden={() => toggleHidden(highlight)}
+            />
           ))
         )}
       </div>
