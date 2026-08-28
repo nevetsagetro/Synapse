@@ -140,6 +140,12 @@ export default function ImportPage() {
             {busy === 'kindle-notebook' ? <RefreshCw size={17} className="animate-spin" /> : <RefreshCw size={17} />}
             Sync Notebook
           </button>
+          {busy === 'kindle-notebook' ? (
+            <p className="text-xs text-slate-500">
+              If your Amazon session expired, a browser window will open on this computer for you to log in —
+              this can take a few minutes. Keep an eye out for it.
+            </p>
+          ) : null}
         </div>
 
         {/* File Upload Card */}
