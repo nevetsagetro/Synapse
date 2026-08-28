@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,6 +11,7 @@ from app.database import engine, init_db
 from app.models.book import Book
 from app.models.highlight import Highlight
 from app.models.import_log import ImportLog
+from app.services.book_identity import authors_compatible, get_or_create_book, normalize_identity
 from app.services.clippings_parser import ParsedClipping, parse_file
 
 
@@ -64,7 +64,7 @@ def import_records(
 
     for record in records:
         try:
-            book, was_created = _get_or_create_book(session, record, now)
+            book, was_created = get_or_create_book(session, record.book_title, record.author, now)
             if was_created:
                 books_created += 1
 
@@ -77,6 +77,18 @@ def import_records(
             if exists:
                 records_skipped += 1
                 continue
+
+            # Cross-source duplicate: the same highlight text can arrive with
+            # a different content_hash if it came from another source (the
+            # Kindle Notebook scraper's hash includes a source prefix, so
+            # identical text never produces a matching hash there). Fall
+            # back to a normalized-content comparison within this book.
+            record_text = normalize_identity(record.content or record.note or "")
+            if record_text:
+                book_highlights = session.exec(select(Highlight).where(Highlight.book_id == book.id)).all()
+                if any(normalize_identity(h.content or h.note or "") == record_text for h in book_highlights):
+                    records_skipped += 1
+                    continue
 
             session.add(
                 Highlight(
@@ -118,6 +130,11 @@ def import_records(
     session.commit()
     session.refresh(log)
 
+    # Self-heal: catch books split across sources (e.g. My Clippings.txt's
+    # "Last, First" author vs. the Kindle Notebook scraper's full contributor
+    # line) so duplicates never accumulate silently between imports.
+    merge_duplicate_books(session)
+
     return ImportSummary(
         source=source,
         file_name=file_name,
@@ -130,35 +147,6 @@ def import_records(
     )
 
 
-def _get_or_create_book(session: Session, record: ParsedClipping, now: datetime) -> tuple[Book, bool]:
-    normalized_title = _normalize_identity(record.book_title)
-    normalized_author = _normalize_identity(record.author or "")
-
-    books = session.exec(select(Book)).all()
-    for book in books:
-        if _normalize_identity(book.title) == normalized_title:
-            db_author = _normalize_identity(book.author or "")
-            if not db_author or not normalized_author or db_author == normalized_author:
-                # Update author if missing in db
-                if not book.author and record.author:
-                    book.author = record.author
-                    session.add(book)
-                return book, False
-
-    book = Book(
-        title=record.book_title,
-        author=record.author,
-        first_imported_at=now,
-        last_imported_at=now,
-        created_at=now,
-        updated_at=now,
-    )
-    session.add(book)
-    session.flush()
-    session.refresh(book)
-    return book, True
-
-
 def merge_duplicate_books(session: Session) -> MergeSummary:
     books = session.exec(select(Book).order_by(Book.created_at)).all()
     canonical_by_key: dict[tuple[str, str], Book] = {}
@@ -167,45 +155,51 @@ def merge_duplicate_books(session: Session) -> MergeSummary:
     duplicate_highlights_removed = 0
 
     for book in books:
-        # Group by title first. We merge if titles match and authors don't strictly conflict
-        title_key = _normalize_identity(book.title)
-        
+        # Group by title first. We merge if titles match and authors are compatible
+        # (not necessarily identical — see authors_compatible).
+        title_key = normalize_identity(book.title)
+
         # Find if we already have a canonical book for this title
         canonical = None
         for (c_title, c_author), c_book in canonical_by_key.items():
-            if c_title == title_key:
-                # Same title. Do authors conflict?
-                b_author = _normalize_identity(book.author or "")
-                if not c_author or not b_author or c_author == b_author:
-                    canonical = c_book
-                    # Update canonical author if missing
-                    if not canonical.author and book.author:
-                        canonical.author = book.author
-                        # Update the key with the new author
-                        del canonical_by_key[(c_title, c_author)]
-                        canonical_by_key[(c_title, _normalize_identity(book.author))] = canonical
-                    break
+            if c_title == title_key and authors_compatible(c_book.author, book.author):
+                canonical = c_book
+                # Update canonical author if missing
+                if not canonical.author and book.author:
+                    canonical.author = book.author
+                    # Update the key with the new author
+                    del canonical_by_key[(c_title, c_author)]
+                    canonical_by_key[(c_title, normalize_identity(book.author))] = canonical
+                break
 
         if canonical is None:
             # First time seeing this title/author combo
-            canonical_by_key[(title_key, _normalize_identity(book.author or ""))] = book
+            canonical_by_key[(title_key, normalize_identity(book.author or ""))] = book
             continue
+
+        # Highlight-level dedup can't rely on content_hash alone: the Kindle
+        # Notebook scraper and the My Clippings.txt parser hash the same text
+        # differently (the scraper's hash includes a source prefix), so an
+        # identical highlight pulled from both sources never has a matching
+        # hash. Fall back to normalized-content comparison, which is what
+        # actually catches the duplicate.
+        canonical_highlights = session.exec(select(Highlight).where(Highlight.book_id == canonical.id)).all()
+        canonical_hashes = {h.content_hash for h in canonical_highlights}
+        canonical_content = {normalize_identity(h.content or h.note or "") for h in canonical_highlights}
 
         highlights = session.exec(select(Highlight).where(Highlight.book_id == book.id)).all()
         for highlight in highlights:
-            existing = session.exec(
-                select(Highlight).where(
-                    Highlight.book_id == canonical.id,
-                    Highlight.content_hash == highlight.content_hash,
-                )
-            ).first()
-            if existing:
+            highlight_content = normalize_identity(highlight.content or highlight.note or "")
+            is_duplicate = highlight.content_hash in canonical_hashes or highlight_content in canonical_content
+            if is_duplicate:
                 session.delete(highlight)
                 duplicate_highlights_removed += 1
             else:
                 highlight.book_id = canonical.id
                 session.add(highlight)
                 highlights_moved += 1
+                canonical_hashes.add(highlight.content_hash)
+                canonical_content.add(highlight_content)
 
         session.delete(book)
         books_merged += 1
@@ -222,11 +216,6 @@ def merge_duplicate_books(session: Session) -> MergeSummary:
         highlights_moved=highlights_moved,
         duplicate_highlights_removed=duplicate_highlights_removed,
     )
-
-
-def _normalize_identity(value: str) -> str:
-    cleaned = re.sub(r"[\ufeff\u200b\u200c\u200d]", "", value)
-    return re.sub(r"\s+", " ", cleaned.strip().casefold())
 
 
 def _parse_iso_datetime(value: str | None) -> datetime | None:

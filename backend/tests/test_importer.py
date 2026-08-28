@@ -81,6 +81,75 @@ def test_import_merges_book_identity_case_and_spacing(tmp_path: Path) -> None:
     assert len(highlights) == 2
 
 
+def test_import_records_merges_books_across_differing_author_formats(tmp_path: Path) -> None:
+    # Regression test for the live bug: My Clippings.txt import created
+    # "La agonía del Eros" / "Han, Byung-Chul" (13 highlights); a later
+    # Kindle Notebook sync created a second "La agonía del Eros" book under
+    # the full contributor string, and none of its highlights were caught
+    # as duplicates because the cross-source dedup was scoped to book_id.
+    engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    SQLModel.metadata.create_all(engine)
+
+    from app.services.clippings_parser import ParsedClipping
+
+    from_clippings = ParsedClipping(
+        book_title="La agonía del Eros (Spanish Edition)",
+        author="Han, Byung-Chul",
+        content="La experiencia amorosa es toda ella un entramado de impotencia,",
+        note=None,
+        highlight_type="highlight",
+        page=5,
+        location_start=51,
+        location_end=51,
+        date_added=None,
+        source="my_clippings",
+        content_hash="clippings-hash-1",
+    )
+    # Same highlight text, but hashed the way the Kindle Notebook scraper
+    # hashes it (source-prefixed), so content_hash never matches across
+    # sources even for identical text — the dedup must fall back to content.
+    from_notebook_duplicate = ParsedClipping(
+        book_title="La agonía del Eros (Spanish Edition)",
+        author="Byung-Chul Han, Antoni Martínez Riu, Raúl Gabás, Alain Badiou, and Ferran Fernández",
+        content="La experiencia amorosa es toda ella un entramado de impotencia,",
+        note=None,
+        highlight_type="highlight",
+        page=5,
+        location_start=51,
+        location_end=51,
+        date_added=None,
+        source="kindle_notebook",
+        content_hash="kindle_notebook|different-hash-scheme",
+    )
+    from_notebook_new = ParsedClipping(
+        book_title="La agonía del Eros (Spanish Edition)",
+        author="Byung-Chul Han, Antoni Martínez Riu, Raúl Gabás, Alain Badiou, and Ferran Fernández",
+        content="ya que el amor verdadero asume que es necesario no ser ya nada",
+        note=None,
+        highlight_type="highlight",
+        page=6,
+        location_start=54,
+        location_end=55,
+        date_added=None,
+        source="kindle_notebook",
+        content_hash="kindle_notebook|another-different-hash",
+    )
+
+    with Session(engine) as session:
+        import_records([from_clippings], session, source="my_clippings")
+        import_records([from_notebook_duplicate, from_notebook_new], session, source="kindle_notebook")
+
+        books = session.exec(select(Book)).all()
+        highlights = session.exec(select(Highlight)).all()
+
+    assert len(books) == 1, "the two author formats should resolve to one book"
+    assert books[0].total_highlights == 2
+    assert len(highlights) == 2, "the duplicate highlight (different hash, same text) should be removed"
+    contents = {h.content for h in highlights}
+    assert "La experiencia amorosa es toda ella un entramado de impotencia," in contents
+    assert "ya que el amor verdadero asume que es necesario no ser ya nada" in contents
+
+
 def test_merge_duplicate_books_repairs_existing_bom_split(tmp_path: Path) -> None:
     engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}")
     SQLModel.metadata.create_all(engine)

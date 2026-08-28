@@ -318,51 +318,57 @@ def scrape_highlights(*, headed: bool = False, reset_session: bool = False) -> l
         for book_idx, (book_title, author, click_el) in enumerate(book_items, start=1):
             print(f"  [{book_idx}/{total_books}] {book_title}" + (f" — {author}" if author else ""))
 
-            # Click the title span to load that book's annotations
+            # Everything for this book — click, page load, and extraction — is
+            # guarded together. A scrape can run for many minutes across a
+            # whole library; without this, one bad annotation on book 90 of
+            # 100 would raise out of the entire function and silently
+            # discard every highlight already gathered from books 1-89,
+            # since results are only written to the database after this
+            # whole loop returns (see import_kindle_highlights below).
             try:
                 click_el.click()
                 page.wait_for_timeout(500) # Wait for JS event loop to start the fetch
                 page.wait_for_load_state("networkidle", timeout=15_000)
                 page.wait_for_timeout(1000) # Wait for DOM to render the new annotations
+
+                # ── Scrape annotations ───────────────────────────────────
+                annotation_containers = page.query_selector_all(_SEL_ANNOT_CONTAINER)
+                highlight_count = 0
+
+                for container in annotation_containers:
+                    highlight_el = container.query_selector(_SEL_HIGHLIGHT_TEXT)
+                    note_el      = container.query_selector(_SEL_NOTE_TEXT)
+                    header_el    = container.query_selector(_SEL_ANNOT_HEADER)
+
+                    highlight_text = (highlight_el.inner_text() if highlight_el else "").strip()
+                    note_text      = (note_el.inner_text()      if note_el      else "").strip() or None
+                    header_text    = (header_el.inner_text()    if header_el    else "").strip()
+
+                    if not highlight_text:
+                        continue
+
+                    page_num, loc_start, loc_end = _parse_location_header(header_text)
+                    ch = _kindle_content_hash(book_title, author, highlight_text, note_text, loc_start, loc_end)
+
+                    results.append({
+                        "book_title":     book_title,
+                        "author":         author,
+                        "content":        highlight_text,
+                        "note":           note_text,
+                        "highlight_type": "highlight",
+                        "page":           page_num,
+                        "location_start": loc_start,
+                        "location_end":   loc_end,
+                        "date_added":     None,
+                        "source":         SOURCE,
+                        "content_hash":   ch,
+                    })
+                    highlight_count += 1
+
+                print(f"    ✔  {highlight_count} highlight(s)")
             except Exception as e:
-                print(f"    ⚠️  Could not load book: {e}")
+                print(f"    ⚠️  Could not scrape this book, skipping it: {e}")
                 continue
-
-            # ── Scrape annotations ───────────────────────────────────────────
-            annotation_containers = page.query_selector_all(_SEL_ANNOT_CONTAINER)
-            highlight_count = 0
-
-            for container in annotation_containers:
-                highlight_el = container.query_selector(_SEL_HIGHLIGHT_TEXT)
-                note_el      = container.query_selector(_SEL_NOTE_TEXT)
-                header_el    = container.query_selector(_SEL_ANNOT_HEADER)
-
-                highlight_text = (highlight_el.inner_text() if highlight_el else "").strip()
-                note_text      = (note_el.inner_text()      if note_el      else "").strip() or None
-                header_text    = (header_el.inner_text()    if header_el    else "").strip()
-
-                if not highlight_text:
-                    continue
-
-                page_num, loc_start, loc_end = _parse_location_header(header_text)
-                ch = _kindle_content_hash(book_title, author, highlight_text, note_text, loc_start, loc_end)
-
-                results.append({
-                    "book_title":     book_title,
-                    "author":         author,
-                    "content":        highlight_text,
-                    "note":           note_text,
-                    "highlight_type": "highlight",
-                    "page":           page_num,
-                    "location_start": loc_start,
-                    "location_end":   loc_end,
-                    "date_added":     None,
-                    "source":         SOURCE,
-                    "content_hash":   ch,
-                })
-                highlight_count += 1
-
-            print(f"    ✔  {highlight_count} highlight(s)")
 
         browser.close()
 
@@ -384,9 +390,10 @@ def import_kindle_highlights(raw_records: list[dict]) -> dict:
     so highlights from this source never collide with file-imported ones.
     """
     from app.database import engine, init_db
-    from app.models.book import Book
     from app.models.highlight import Highlight
     from app.models.import_log import ImportLog
+    from app.services.book_identity import get_or_create_book, normalize_identity
+    from app.services.importer import merge_duplicate_books
     from sqlmodel import Session, select
 
     if not raw_records:
@@ -408,38 +415,11 @@ def import_kindle_highlights(raw_records: list[dict]) -> dict:
     records_failed = 0
     errors: list[str] = []
 
-    def _normalize(v: str) -> str:
-        return re.sub(r"\s+", " ", re.sub(r"[\ufeff\u200b\u200c\u200d]", "", v).strip().casefold())
-
-    def _get_or_create_book(session: Session, title: str, author: Optional[str]) -> tuple[Book, bool]:
-        norm_title  = _normalize(title)
-        norm_author = _normalize(author or "")
-        for book in session.exec(select(Book)).all():
-            if _normalize(book.title) == norm_title:
-                db_author = _normalize(book.author or "")
-                if not db_author or not norm_author or db_author == norm_author:
-                    if not book.author and author:
-                        book.author = author
-                        session.add(book)
-                    return book, False
-        book = Book(
-            title=title, author=author,
-            first_imported_at=now, last_imported_at=now,
-            created_at=now, updated_at=now,
-        )
-        session.add(book)
-        session.flush()
-        session.refresh(book)
-        return book, True
-
-    def _norm_content(v: str) -> str:
-        return re.sub(r"\s+", " ", v.strip().casefold())
-
     with Session(engine) as session:
         for record in raw_records:
             try:
-                book, was_created = _get_or_create_book(
-                    session, record["book_title"], record["author"]
+                book, was_created = get_or_create_book(
+                    session, record["book_title"], record["author"], now
                 )
                 if was_created:
                     books_created += 1
@@ -458,12 +438,12 @@ def import_kindle_highlights(raw_records: list[dict]) -> dict:
 
                 # ── Dedup 2: cross-source — skip if same text already exists ──
                 # (the my_clippings version is richer: it has page/location/date)
-                norm_incoming = _norm_content(record["content"])
+                norm_incoming = normalize_identity(record["content"])
                 all_book_highlights = session.exec(
                     select(Highlight).where(Highlight.book_id == book.id)
                 ).all()
                 already_exists = any(
-                    _norm_content(h.content or "") == norm_incoming
+                    normalize_identity(h.content or "") == norm_incoming
                     for h in all_book_highlights
                 )
                 if already_exists:
@@ -507,6 +487,15 @@ def import_kindle_highlights(raw_records: list[dict]) -> dict:
         session.add(log)
         session.commit()
         session.refresh(log)
+        log_id = str(log.id)
+
+        # Self-heal: catch books split across sources (e.g. an author string
+        # that differs between My Clippings.txt and this scraper) so
+        # duplicates never accumulate silently between imports. This commits
+        # again internally, which is why log_id was captured above rather
+        # than read from `log` after this point — commit() expires ORM
+        # objects, and by the time we return, the session is closed.
+        merge_duplicate_books(session)
 
     return {
         "source":          SOURCE,
@@ -515,7 +504,7 @@ def import_kindle_highlights(raw_records: list[dict]) -> dict:
         "records_skipped": records_skipped,
         "records_failed":  records_failed,
         "books_created":   books_created,
-        "import_log_id":   str(log.id),
+        "import_log_id":   log_id,
     }
 
 
