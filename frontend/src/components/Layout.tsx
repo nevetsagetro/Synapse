@@ -78,6 +78,10 @@ export default function Layout() {
       <main className="mx-auto max-w-6xl px-4 py-8">
         <Outlet />
       </main>
+
+      <footer className="border-t border-slate-800 py-6 text-center text-sm text-slate-500">
+        Built with 💕 by NevetsAgetro
+      </footer>
     </div>
   );
 }
