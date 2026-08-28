@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Book, BookSort, Highlight, HighlightWithBook, ImportLog, ImportSummary, InsightsSummary, RelatedHighlight, SparkHighlight, Summary, AIGenreRecommendation, Thought, AIGeneration } from '../types';
+import type { Book, BookSort, Highlight, HighlightWithBook, ImportLog, ImportSummary, InsightsSummary, RelatedHighlight, SparkHighlight, SparkStreak, Summary, AIGenreRecommendation, Thought, AIGeneration } from '../types';
 
 export const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL ?? ''
@@ -115,6 +115,16 @@ export async function getHiddenHighlights() {
 
 export async function searchHighlights(query: string) {
   const response = await api.get<HighlightWithBook[]>('/api/highlights/search', { params: { q: query } });
+  return response.data;
+}
+
+export async function getOnThisDay() {
+  const response = await api.get<HighlightWithBook[]>('/api/spark/on-this-day');
+  return response.data;
+}
+
+export async function getSparkStreak() {
+  const response = await api.get<SparkStreak>('/api/spark/streak');
   return response.data;
 }
 

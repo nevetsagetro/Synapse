@@ -29,7 +29,15 @@ from app.services.embeddings import backfill_embeddings, get_related_highlights
 from app.services.importer import import_clippings_file
 from app.services.insights import get_insights_summary
 from app.services.search import search_highlights
-from app.services.spark import mark_highlight_seen, select_daily_spark, set_highlight_favorite, set_highlight_hidden
+from app.services.spark import (
+    get_on_this_day_highlights,
+    get_spark_streak,
+    mark_highlight_seen,
+    record_spark_visit,
+    select_daily_spark,
+    set_highlight_favorite,
+    set_highlight_hidden,
+)
 
 settings = get_settings()
 project_root = Path(__file__).resolve().parents[2]
@@ -336,6 +344,7 @@ def _serialize_highlight_with_book(highlight: Highlight, book: Book | None) -> d
 
 @app.get("/api/spark")
 def spark(session: Session = Depends(get_session)) -> dict[str, object | None]:
+    record_spark_visit(session)
     item = select_daily_spark(session)
     if not item:
         return {"highlight": None}
@@ -363,6 +372,17 @@ def spark(session: Session = Depends(get_session)) -> dict[str, object | None]:
             "thoughts": [{"id": str(t.id), "content": t.content, "created_at": t.created_at.isoformat()} for t in thoughts]
         }
     }
+
+
+@app.get("/api/spark/streak")
+def spark_streak(session: Session = Depends(get_session)) -> dict[str, int]:
+    return get_spark_streak(session)
+
+
+@app.get("/api/spark/on-this-day")
+def spark_on_this_day(session: Session = Depends(get_session)) -> list[dict[str, object]]:
+    items = get_on_this_day_highlights(session)
+    return [_serialize_highlight_with_book(item.highlight, item.book) for item in items]
 
 
 @app.post("/api/highlights/{highlight_id}/seen")

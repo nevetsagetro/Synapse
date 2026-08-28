@@ -1,30 +1,20 @@
 import { useEffect, useState } from 'react';
-import { Copy, Eye, EyeOff, RefreshCw, Star, Sparkles, Send } from 'lucide-react';
-import { favoriteHighlight, getSpark, hideHighlight, markSparkSeen, unfavoriteHighlight, getRelatedHighlights, addThought } from '../api';
-import type { SparkHighlight, RelatedHighlight, Thought } from '../types';
-
-const SOURCE_LABELS: Record<string, { label: string; className: string }> = {
-  my_clippings: {
-    label: 'Kindle Clippings',
-    className: 'bg-amber-900/40 text-amber-300 border border-amber-800/50',
-  },
-  kindle_notebook: {
-    label: 'Kindle Notebook',
-    className: 'bg-sky-900/40 text-sky-300 border border-sky-800/50',
-  },
-};
-
-function SourceBadge({ source }: { source: string }) {
-  const config = SOURCE_LABELS[source] ?? {
-    label: source,
-    className: 'bg-slate-800 text-slate-400 border border-slate-700',
-  };
-  return (
-    <span className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${config.className}`}>
-      {config.label}
-    </span>
-  );
-}
+import { Copy, Eye, EyeOff, Flame, RefreshCw, Star, Sparkles, Send } from 'lucide-react';
+import {
+  favoriteHighlight,
+  getOnThisDay,
+  getSpark,
+  getSparkStreak,
+  hideHighlight,
+  markSparkSeen,
+  unfavoriteHighlight,
+  unhideHighlight,
+  getRelatedHighlights,
+  addThought,
+} from '../api';
+import type { HighlightWithBook, SparkHighlight, RelatedHighlight, SparkStreak, Thought } from '../types';
+import SourceBadge, { sourceLabel } from '../components/SourceBadge';
+import HighlightCard from '../components/HighlightCard';
 
 export default function SparkPage() {
   const [highlight, setHighlight] = useState<SparkHighlight | null>(null);
@@ -34,6 +24,8 @@ export default function SparkPage() {
   const [loadingRelated, setLoadingRelated] = useState(false);
   const [newThought, setNewThought] = useState('');
   const [savingThought, setSavingThought] = useState(false);
+  const [streak, setStreak] = useState<SparkStreak | null>(null);
+  const [onThisDay, setOnThisDay] = useState<HighlightWithBook[]>([]);
 
   async function refresh() {
     setLoading(true);
@@ -41,7 +33,10 @@ export default function SparkPage() {
     const result = await getSpark();
     setHighlight(result.highlight);
     setLoading(false);
-    
+
+    getSparkStreak().then(setStreak).catch(() => setStreak(null));
+    getOnThisDay().then(setOnThisDay).catch(() => setOnThisDay([]));
+
     if (result.highlight) {
       setLoadingRelated(true);
       try {
@@ -97,10 +92,10 @@ export default function SparkPage() {
     }
 
     // Source attribution line
-    const sourceLabel = SOURCE_LABELS[(highlight as any).source]?.label ?? (highlight as any).source;
-    if (sourceLabel) {
+    const attribution = sourceLabel((highlight as any).source);
+    if (attribution) {
       lines.push(`> `);
-      lines.push(`> — *${sourceLabel}*`);
+      lines.push(`> — *${attribution}*`);
     }
     
     navigator.clipboard.writeText(lines.join('\n')).then(() => {
@@ -133,11 +128,32 @@ export default function SparkPage() {
     refresh().catch(() => setLoading(false));
   }, []);
 
+  async function toggleOnThisDayFavorite(item: HighlightWithBook) {
+    const updated = item.is_favorite ? await unfavoriteHighlight(item.id) : await favoriteHighlight(item.id);
+    setOnThisDay((prev) => prev.map((h) => (h.id === item.id ? { ...h, is_favorite: updated.is_favorite } : h)));
+  }
+
+  async function toggleOnThisDayHidden(item: HighlightWithBook) {
+    const updated = item.is_hidden ? await unhideHighlight(item.id) : await hideHighlight(item.id);
+    setOnThisDay((prev) => prev.filter((h) => h.id !== item.id || !updated.is_hidden));
+  }
+
   return (
     <section className="space-y-5">
       <p className="text-sm uppercase tracking-wide text-amber-400">Daily Spark</p>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <h1 className="text-3xl font-semibold">One remembered idea, every day</h1>
+        <div className="space-y-2">
+          <h1 className="text-3xl font-semibold">One remembered idea, every day</h1>
+          {streak && streak.current_streak > 0 ? (
+            <p className="inline-flex items-center gap-1.5 text-sm font-medium text-amber-400">
+              <Flame size={16} className="fill-amber-400" />
+              {streak.current_streak} day{streak.current_streak === 1 ? '' : 's'} in a row
+              {streak.longest_streak > streak.current_streak ? (
+                <span className="text-slate-500">· best {streak.longest_streak}</span>
+              ) : null}
+            </p>
+          ) : null}
+        </div>
         <button
           type="button"
           onClick={refresh}
@@ -264,6 +280,29 @@ export default function SparkPage() {
                   {item.book_title}
                 </p>
               </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* On This Day Section */}
+      {onThisDay.length > 0 && (
+        <div className="mt-8 space-y-4">
+          <h2 className="text-lg font-semibold flex items-center gap-2">
+            <Sparkles size={18} className="text-amber-400" />
+            On this day
+          </h2>
+          <div className="grid gap-4">
+            {onThisDay.map((item) => (
+              <HighlightCard
+                key={item.id}
+                highlight={item}
+                bookTitle={item.book_title}
+                bookAuthor={item.author}
+                bookHref={`/books/${item.book_id}`}
+                onToggleFavorite={() => toggleOnThisDayFavorite(item)}
+                onToggleHidden={() => toggleOnThisDayHidden(item)}
+              />
             ))}
           </div>
         </div>

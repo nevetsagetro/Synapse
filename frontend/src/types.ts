@@ -61,6 +61,12 @@ export type HighlightWithBook = {
 
 export type BookSort = 'title' | 'highlights' | 'recent';
 
+export type SparkStreak = {
+  current_streak: number;
+  longest_streak: number;
+  total_days: number;
+};
+
 export type Summary = {
   books: number;
   highlights: number;
