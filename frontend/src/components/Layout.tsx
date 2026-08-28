@@ -1,5 +1,7 @@
-import { BarChart3, BookOpen, Flame, Import, Library } from 'lucide-react';
+import { useState } from 'react';
+import { BarChart3, BookOpen, Flame, Import, Library, Power } from 'lucide-react';
 import { NavLink, Outlet } from 'react-router-dom';
+import { shutdownSynapse } from '../api';
 
 const links = [
   { to: '/spark', label: 'Spark', icon: Flame },
@@ -9,6 +11,22 @@ const links = [
 ];
 
 export default function Layout() {
+  const [isShuttingDown, setIsShuttingDown] = useState(false);
+
+  const handleShutdown = async () => {
+    if (!window.confirm('Shut down Synapse?')) {
+      return;
+    }
+
+    setIsShuttingDown(true);
+    try {
+      await shutdownSynapse();
+    } catch {
+      setIsShuttingDown(false);
+      window.alert('Synapse could not be shut down from the app.');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <header className="border-b border-slate-800 bg-slate-950/95">
@@ -41,6 +59,16 @@ export default function Layout() {
                 {label}
               </NavLink>
             ))}
+            <button
+              type="button"
+              onClick={handleShutdown}
+              disabled={isShuttingDown}
+              title="Shut down Synapse"
+              className="inline-flex h-10 items-center gap-2 rounded px-3 text-sm font-medium text-slate-300 transition hover:bg-red-950/70 hover:text-red-100 disabled:cursor-wait disabled:opacity-60"
+            >
+              <Power size={17} aria-hidden="true" />
+              {isShuttingDown ? 'Stopping' : 'Shutdown'}
+            </button>
           </nav>
         </div>
       </header>

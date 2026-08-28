@@ -10,6 +10,11 @@ export async function getHealth() {
   return response.data;
 }
 
+export async function shutdownSynapse() {
+  const response = await api.post<{ status: string }>('/api/shutdown');
+  return response.data;
+}
+
 export async function getSummary() {
   const response = await api.get<Summary>('/api/summary');
   return response.data;

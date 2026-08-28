@@ -3,7 +3,10 @@ from contextlib import asynccontextmanager
 import csv
 import io
 import json
+import os
 from pathlib import Path
+import signal
+import threading
 from tempfile import NamedTemporaryFile
 from uuid import UUID
 
@@ -57,6 +60,16 @@ app.add_middleware(
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "app": settings.app_name}
+
+
+def _shutdown_process() -> None:
+    threading.Timer(0.5, lambda: os.kill(os.getpid(), signal.SIGTERM)).start()
+
+
+@app.post("/api/shutdown")
+def shutdown() -> dict[str, str]:
+    _shutdown_process()
+    return {"status": "shutting_down"}
 
 
 @app.get("/api/summary")
