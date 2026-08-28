@@ -24,7 +24,7 @@ from app.models.highlight import Highlight
 from app.models.import_log import ImportLog
 from app.models.thought import Thought
 from app.services.ai_recommendations import get_ai_book_recommendations
-from app.services.covers import backfill_covers
+from app.services.covers import backfill_covers, set_manual_cover
 from app.services.embeddings import backfill_embeddings, get_related_highlights
 from app.services.importer import import_clippings_file
 from app.services.insights import get_insights_summary
@@ -195,6 +195,23 @@ def book_detail(book_id: UUID, session: Session = Depends(get_session)) -> dict[
         },
         "highlights": highlights_data,
     }
+
+
+class BookCoverUpdate(BaseModel):
+    cover_url: str | None = None
+
+
+@app.patch("/api/books/{book_id}/cover")
+def update_book_cover(
+    book_id: UUID, payload: BookCoverUpdate, session: Session = Depends(get_session)
+) -> dict[str, str | None]:
+    book = session.get(Book, book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+
+    cleaned = (payload.cover_url or "").strip() or None
+    updated = set_manual_cover(session, book, cleaned)
+    return {"id": str(updated.id), "cover_url": updated.cover_url}
 
 
 @app.get("/api/imports")

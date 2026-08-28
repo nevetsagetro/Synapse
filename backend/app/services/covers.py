@@ -1,4 +1,5 @@
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 from sqlmodel import Session, select
@@ -59,12 +60,30 @@ def fetch_cover_url(title: str, author: str | None) -> str | None:
 
 def backfill_covers(session: Session) -> dict[str, int]:
     books = session.exec(select(Book).where(Book.cover_url.is_(None))).all()
+    if not books:
+        return {"processed": 0, "found": 0}
+
+    # Each lookup is 1-2 independent HTTP round trips to Open Library with
+    # nothing shared between books, so running them one at a time made this
+    # take roughly (book count) x (request latency) — noticeably slow past a
+    # handful of books. Fetching is pure I/O with no session access, so it's
+    # safe to parallelize; only the DB writes below stay on this thread.
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        cover_urls = list(executor.map(lambda b: fetch_cover_url(b.title, b.author), books))
+
     found = 0
-    for book in books:
-        cover_url = fetch_cover_url(book.title, book.author)
+    for book, cover_url in zip(books, cover_urls):
         if cover_url:
             book.cover_url = cover_url
             session.add(book)
             found += 1
     session.commit()
     return {"processed": len(books), "found": found}
+
+
+def set_manual_cover(session: Session, book: Book, cover_url: str | None) -> Book:
+    book.cover_url = cover_url
+    session.add(book)
+    session.commit()
+    session.refresh(book)
+    return book

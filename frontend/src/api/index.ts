@@ -138,6 +138,13 @@ export async function backfillCovers() {
   return response.data;
 }
 
+export async function setBookCover(bookId: string, coverUrl: string | null) {
+  const response = await api.patch<{ id: string; cover_url: string | null }>(`/api/books/${bookId}/cover`, {
+    cover_url: coverUrl,
+  });
+  return response.data;
+}
+
 export async function getEmbeddingStatus() {
   const response = await api.get<{ missing: number }>('/api/embeddings/status');
   return response.data;
