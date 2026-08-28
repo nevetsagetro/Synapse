@@ -121,9 +121,17 @@ def ai_recommendations_history(session: Session = Depends(get_session)) -> list[
     return history
 
 
+BOOK_SORT_COLUMNS = {
+    "title": Book.title,
+    "highlights": Book.total_highlights.desc(),
+    "recent": Book.last_imported_at.desc(),
+}
+
+
 @app.get("/api/books")
-def books(session: Session = Depends(get_session)) -> list[dict[str, str | int | None]]:
-    rows = session.exec(select(Book).order_by(Book.title)).all()
+def books(sort: str = "title", session: Session = Depends(get_session)) -> list[dict[str, str | int | None]]:
+    order = BOOK_SORT_COLUMNS.get(sort, Book.title)
+    rows = session.exec(select(Book).order_by(order)).all()
     return [
         {
             "id": str(book.id),

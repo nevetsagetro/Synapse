@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Book, Highlight, HighlightWithBook, ImportLog, ImportSummary, InsightsSummary, RelatedHighlight, SparkHighlight, Summary, AIGenreRecommendation, Thought, AIGeneration } from '../types';
+import type { Book, BookSort, Highlight, HighlightWithBook, ImportLog, ImportSummary, InsightsSummary, RelatedHighlight, SparkHighlight, Summary, AIGenreRecommendation, Thought, AIGeneration } from '../types';
 
 export const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL ?? ''
@@ -35,8 +35,8 @@ export async function getAIRecommendationsHistory() {
   return response.data;
 }
 
-export async function getBooks() {
-  const response = await api.get<Book[]>('/api/books');
+export async function getBooks(sort: BookSort = 'title') {
+  const response = await api.get<Book[]>('/api/books', { params: { sort } });
   return response.data;
 }
 

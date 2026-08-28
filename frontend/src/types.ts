@@ -59,6 +59,8 @@ export type HighlightWithBook = {
   is_hidden: boolean;
 };
 
+export type BookSort = 'title' | 'highlights' | 'recent';
+
 export type Summary = {
   books: number;
   highlights: number;

@@ -2,11 +2,18 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { BookOpen, Download, ImagePlus, RefreshCw, Search } from 'lucide-react';
 import { backfillCovers, getBooks, getCoverStatus } from '../api';
-import type { Book } from '../types';
+import type { Book, BookSort } from '../types';
+
+const SORT_OPTIONS: { value: BookSort; label: string }[] = [
+  { value: 'title', label: 'Title (A-Z)' },
+  { value: 'highlights', label: 'Most highlights' },
+  { value: 'recent', label: 'Recently imported' },
+];
 
 export default function LibraryPage() {
   const [books, setBooks] = useState<Book[]>([]);
   const [query, setQuery] = useState('');
+  const [sort, setSort] = useState<BookSort>('title');
   const [error, setError] = useState<string | null>(null);
   const [missingCovers, setMissingCovers] = useState<number | null>(null);
   const [fetchingCovers, setFetchingCovers] = useState(false);
@@ -14,10 +21,10 @@ export default function LibraryPage() {
   const apiUrl = import.meta.env.VITE_API_URL ?? '';
 
   useEffect(() => {
-    getBooks()
+    getBooks(sort)
       .then(setBooks)
       .catch((err) => setError(err instanceof Error ? err.message : 'Could not load books.'));
-  }, []);
+  }, [sort]);
 
   useEffect(() => {
     getCoverStatus()
@@ -29,7 +36,7 @@ export default function LibraryPage() {
     setFetchingCovers(true);
     try {
       await backfillCovers();
-      const [nextBooks, status] = await Promise.all([getBooks(), getCoverStatus()]);
+      const [nextBooks, status] = await Promise.all([getBooks(sort), getCoverStatus()]);
       setBooks(nextBooks);
       setMissingCovers(status.missing);
     } catch (err) {
@@ -52,15 +59,28 @@ export default function LibraryPage() {
           <h1 className="text-3xl font-semibold">Your books</h1>
           <p className="max-w-2xl text-slate-300">Browse imported Kindle books and open their highlights.</p>
         </div>
-        <label className="relative block w-full md:w-80">
-          <Search className="pointer-events-none absolute left-3 top-3 text-slate-500" size={18} />
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search books"
-            className="h-11 w-full rounded border border-slate-800 bg-slate-900 pl-10 pr-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-amber-500"
-          />
-        </label>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <label className="relative block w-full sm:w-64">
+            <Search className="pointer-events-none absolute left-3 top-3 text-slate-500" size={18} />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search books"
+              className="h-11 w-full rounded border border-slate-800 bg-slate-900 pl-10 pr-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-amber-500"
+            />
+          </label>
+          <select
+            value={sort}
+            onChange={(event) => setSort(event.target.value as BookSort)}
+            className="h-11 rounded border border-slate-800 bg-slate-900 px-3 text-sm text-slate-100 outline-none transition focus:border-amber-500"
+          >
+            {SORT_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
