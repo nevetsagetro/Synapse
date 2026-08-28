@@ -24,6 +24,7 @@ from app.models.highlight import Highlight
 from app.models.import_log import ImportLog
 from app.models.thought import Thought
 from app.services.ai_recommendations import get_ai_book_recommendations
+from app.services.covers import backfill_covers
 from app.services.embeddings import backfill_embeddings, get_related_highlights
 from app.services.importer import import_clippings_file
 from app.services.insights import get_insights_summary
@@ -416,6 +417,17 @@ def hidden_highlights(session: Session = Depends(get_session)) -> list[dict[str,
 def highlights_search(q: str = "", session: Session = Depends(get_session)) -> list[dict[str, object]]:
     highlights = search_highlights(session, q)
     return [_serialize_highlight_with_book(h, session.get(Book, h.book_id)) for h in highlights]
+
+
+@app.get("/api/books/covers/status")
+def covers_status(session: Session = Depends(get_session)) -> dict[str, int]:
+    missing = session.exec(select(func.count(Book.id)).where(Book.cover_url.is_(None))).one()
+    return {"missing": missing}
+
+
+@app.post("/api/books/covers/backfill")
+def covers_backfill(session: Session = Depends(get_session)) -> dict[str, int]:
+    return backfill_covers(session)
 
 
 @app.get("/api/embeddings/status")

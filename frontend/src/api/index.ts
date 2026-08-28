@@ -118,6 +118,16 @@ export async function searchHighlights(query: string) {
   return response.data;
 }
 
+export async function getCoverStatus() {
+  const response = await api.get<{ missing: number }>('/api/books/covers/status');
+  return response.data;
+}
+
+export async function backfillCovers() {
+  const response = await api.post<{ processed: number; found: number }>('/api/books/covers/backfill');
+  return response.data;
+}
+
 export async function getEmbeddingStatus() {
   const response = await api.get<{ missing: number }>('/api/embeddings/status');
   return response.data;

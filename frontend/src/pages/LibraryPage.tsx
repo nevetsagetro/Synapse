@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { BookOpen, Search, Download } from 'lucide-react';
-import { getBooks } from '../api';
+import { BookOpen, Download, ImagePlus, RefreshCw, Search } from 'lucide-react';
+import { backfillCovers, getBooks, getCoverStatus } from '../api';
 import type { Book } from '../types';
 
 export default function LibraryPage() {
   const [books, setBooks] = useState<Book[]>([]);
   const [query, setQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
-  
+  const [missingCovers, setMissingCovers] = useState<number | null>(null);
+  const [fetchingCovers, setFetchingCovers] = useState(false);
+
   const apiUrl = import.meta.env.VITE_API_URL ?? '';
 
   useEffect(() => {
@@ -16,6 +18,26 @@ export default function LibraryPage() {
       .then(setBooks)
       .catch((err) => setError(err instanceof Error ? err.message : 'Could not load books.'));
   }, []);
+
+  useEffect(() => {
+    getCoverStatus()
+      .then((status) => setMissingCovers(status.missing))
+      .catch(() => setMissingCovers(null));
+  }, []);
+
+  async function runCoverBackfill() {
+    setFetchingCovers(true);
+    try {
+      await backfillCovers();
+      const [nextBooks, status] = await Promise.all([getBooks(), getCoverStatus()]);
+      setBooks(nextBooks);
+      setMissingCovers(status.missing);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not fetch covers.');
+    } finally {
+      setFetchingCovers(false);
+    }
+  }
 
   const filtered = books.filter((book) => {
     const haystack = `${book.title} ${book.author ?? ''}`.toLowerCase();
@@ -40,26 +62,37 @@ export default function LibraryPage() {
           />
         </label>
       </div>
-      
-      <div className="flex flex-wrap gap-3">
-        <a 
+
+      <div className="flex flex-wrap items-center gap-3">
+        <a
           href={`${apiUrl}/api/export/json`}
           className="inline-flex h-9 items-center gap-2 rounded border border-slate-700 bg-slate-800 px-3 text-xs font-medium text-slate-200 transition hover:bg-slate-700"
         >
           <Download size={14} /> JSON
         </a>
-        <a 
+        <a
           href={`${apiUrl}/api/export/csv`}
           className="inline-flex h-9 items-center gap-2 rounded border border-slate-700 bg-slate-800 px-3 text-xs font-medium text-slate-200 transition hover:bg-slate-700"
         >
           <Download size={14} /> CSV
         </a>
-        <a 
+        <a
           href={`${apiUrl}/api/export/sqlite`}
           className="inline-flex h-9 items-center gap-2 rounded border border-slate-700 bg-slate-800 px-3 text-xs font-medium text-slate-200 transition hover:bg-slate-700"
         >
           <Download size={14} /> SQLite DB
         </a>
+        {missingCovers ? (
+          <button
+            type="button"
+            onClick={runCoverBackfill}
+            disabled={fetchingCovers}
+            className="inline-flex h-9 items-center gap-2 rounded border border-slate-700 bg-slate-800 px-3 text-xs font-medium text-slate-200 transition hover:bg-slate-700 disabled:cursor-wait disabled:opacity-60"
+          >
+            {fetchingCovers ? <RefreshCw size={14} className="animate-spin" /> : <ImagePlus size={14} />}
+            Fetch {missingCovers} cover{missingCovers === 1 ? '' : 's'}
+          </button>
+        ) : null}
       </div>
 
       {error ? <div className="rounded border border-red-800 bg-red-950 p-4 text-sm text-red-100">{error}</div> : null}
@@ -77,9 +110,13 @@ export default function LibraryPage() {
               className="flex items-center justify-between gap-4 rounded border border-slate-800 bg-slate-900 p-4 transition hover:border-slate-600 hover:bg-slate-900/80"
             >
               <span className="flex min-w-0 items-center gap-3">
-                <span className="grid h-10 w-10 shrink-0 place-items-center rounded bg-slate-800 text-amber-400">
-                  <BookOpen size={19} />
-                </span>
+                {book.cover_url ? (
+                  <img src={book.cover_url} alt="" className="h-14 w-10 shrink-0 rounded object-cover" />
+                ) : (
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded bg-slate-800 text-amber-400">
+                    <BookOpen size={19} />
+                  </span>
+                )}
                 <span className="min-w-0">
                   <span className="block truncate font-medium text-slate-100">{book.title}</span>
                   <span className="block truncate text-sm text-slate-400">{book.author ?? 'Unknown author'}</span>
