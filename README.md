@@ -18,10 +18,10 @@ Opens at `http://localhost:8000`. The frontend is built automatically.
 
 To import highlights, you have two options:
 
-1. **Automated Web Scraper:** Run `python -m scripts.scrape_kindle_notebook` inside the `backend/` directory (with your `.venv` activated). It will open a browser, let you log into Amazon, and automatically download all your highlights from `read.amazon.com/notebook`.
+1. **Sync from Amazon:** Click "Sync Notebook" on the Import tab (or run `python -m scripts.scrape_kindle_notebook` inside `backend/` with your `.venv` activated). First run opens a browser for you to log into Amazon; after that it reuses the saved session and runs quietly in the background. If the saved session ever expires, a browser window will pop up again automatically for you to log back in — keep an eye out for it if a sync seems to be taking a while.
 2. **Manual File Upload:** Plug in your Kindle, grab `My Clippings.txt` from the `documents` folder, and upload it on the Import tab.
 
-Both methods share the same database, and any duplicate highlights are smartly merged!
+Both methods share the same database. Duplicate highlights are merged automatically, even when the two sources disagree on the author string (Amazon's web page lists translators and editors; the device file lists just the author) — Synapse still recognizes it as the same book.
 
 ## Gemini (optional)
 
@@ -35,8 +35,12 @@ Uses `gemini-2.5-flash` for recommendations and `text-embedding-004` for semanti
 
 ## What it does
 
-- **Daily Spark** resurfaces one highlight per day so old books don't get forgotten
+- **Daily Spark** resurfaces one highlight per day so old books don't get forgotten, with a streak counter that tracks how many days in a row you've checked in
+- **On This Day** surfaces highlights you added on this same calendar date in a previous year, right alongside the daily pick
+- **Search** looks up any word or phrase across every highlight and note in your library
+- **Favorites & Hidden** lets you star highlights worth keeping and hide the rest from Spark — both fully reversible from their own page
 - **Personal Thoughts** lets you write timestamped reflections on any highlight, saved locally
+- **Book covers** are fetched automatically from Open Library once you click "Fetch covers" on the Library tab
 - **Insights** shows your highlighting activity, top authors, and books you have marked up most
 - **Related Ideas** runs semantic search across your whole library (requires Gemini key)
 - **Book Discovery** asks Gemini for recommendations grouped by genre, cached locally, never repeats
