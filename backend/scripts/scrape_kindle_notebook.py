@@ -116,17 +116,24 @@ def _parse_location_header(header_text: str) -> tuple[Optional[int], Optional[in
         "Location 100-105"
         "Page 10"
 
+    Amazon localizes this header to the account's language, and the
+    read.amazon.com/notebook page's own wording doesn't necessarily match
+    the device-exported My Clippings.txt wording (e.g. it may use
+    "Ubicación" where the file export uses "posición") — this used to only
+    recognize English "Page"/"Location" and silently returned (None, None,
+    None) for every single highlight on any non-English account.
+
     Returns (page, location_start, location_end).
     """
     page: Optional[int] = None
     loc_start: Optional[int] = None
     loc_end: Optional[int] = None
 
-    page_match = re.search(r"[Pp]age\s+(\d+)", header_text)
+    page_match = re.search(r"(?:[Pp]age|[Pp]ágina)\s+(\d+)", header_text)
     if page_match:
         page = int(page_match.group(1))
 
-    loc_match = re.search(r"[Ll]ocation\s+(\d+)(?:\s*-\s*(\d+))?", header_text)
+    loc_match = re.search(r"(?:[Ll]ocation|[Pp]osición|[Uu]bicación)\s+(\d+)(?:\s*-\s*(\d+))?", header_text)
     if loc_match:
         loc_start = int(loc_match.group(1))
         loc_end = int(loc_match.group(2)) if loc_match.group(2) else loc_start
@@ -403,6 +410,7 @@ def import_kindle_highlights(raw_records: list[dict]) -> dict:
             "records_created": 0,
             "records_skipped": 0,
             "records_failed": 0,
+            "records_backfilled": 0,
             "books_created": 0,
             "import_log_id": None,
         }
@@ -413,6 +421,7 @@ def import_kindle_highlights(raw_records: list[dict]) -> dict:
     records_created = 0
     records_skipped = 0
     records_failed = 0
+    records_backfilled = 0
     errors: list[str] = []
 
     with Session(engine) as session:
@@ -442,11 +451,31 @@ def import_kindle_highlights(raw_records: list[dict]) -> dict:
                 all_book_highlights = session.exec(
                     select(Highlight).where(Highlight.book_id == book.id)
                 ).all()
-                already_exists = any(
-                    normalize_identity(h.content or "") == norm_incoming
-                    for h in all_book_highlights
+                matching_highlight = next(
+                    (h for h in all_book_highlights if normalize_identity(h.content or "") == norm_incoming),
+                    None,
                 )
-                if already_exists:
+                if matching_highlight is not None:
+                    # Backfill metadata an earlier scrape couldn't capture
+                    # (e.g. page/location, before the header-parsing regex
+                    # recognized Spanish headers) instead of silently
+                    # discarding a richer re-scrape of the same highlight.
+                    # Only fills gaps — never overwrites data already there.
+                    backfilled = False
+                    if matching_highlight.page is None and record["page"] is not None:
+                        matching_highlight.page = record["page"]
+                        backfilled = True
+                    if matching_highlight.location_start is None and record["location_start"] is not None:
+                        matching_highlight.location_start = record["location_start"]
+                        matching_highlight.location_end = record["location_end"]
+                        backfilled = True
+                    if not matching_highlight.note and record["note"]:
+                        matching_highlight.note = record["note"]
+                        backfilled = True
+                    if backfilled:
+                        matching_highlight.updated_at = now
+                        session.add(matching_highlight)
+                        records_backfilled += 1
                     records_skipped += 1
                     continue
 
@@ -498,13 +527,14 @@ def import_kindle_highlights(raw_records: list[dict]) -> dict:
         merge_duplicate_books(session)
 
     return {
-        "source":          SOURCE,
-        "records_seen":    len(raw_records),
-        "records_created": records_created,
-        "records_skipped": records_skipped,
-        "records_failed":  records_failed,
-        "books_created":   books_created,
-        "import_log_id":   log_id,
+        "source":             SOURCE,
+        "records_seen":       len(raw_records),
+        "records_created":    records_created,
+        "records_skipped":    records_skipped,
+        "records_failed":     records_failed,
+        "records_backfilled": records_backfilled,
+        "books_created":      books_created,
+        "import_log_id":      log_id,
     }
 
 
