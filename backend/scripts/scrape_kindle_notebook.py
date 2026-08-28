@@ -111,17 +111,25 @@ def _kindle_content_hash(
 
 def _parse_location_header(header_text: str) -> tuple[Optional[int], Optional[int], Optional[int]]:
     """
-    Parse the annotation header string produced by Amazon, e.g.:
-        "Page 42 · Location 612-618"
-        "Location 100-105"
-        "Page 10"
+    Parse the annotation header string produced by Amazon.
 
-    Amazon localizes this header to the account's language, and the
-    read.amazon.com/notebook page's own wording doesn't necessarily match
-    the device-exported My Clippings.txt wording (e.g. it may use
-    "Ubicación" where the file export uses "posición") — this used to only
-    recognize English "Page"/"Location" and silently returned (None, None,
-    None) for every single highlight on any non-English account.
+    Verified against a live read.amazon.com/notebook session: the real
+    format is "Yellow highlight | Location:\xa029" (color name, "|"
+    separator, a literal colon then a non-breaking space before the
+    number, and — at least for ebooks with no matching print edition —
+    no page number at all). Earlier versions of this regex assumed an
+    invented "Page 42 · Location 612-618" format that never actually
+    matched the live page, and a later attempt assumed the mismatch was
+    a Spanish-locale wording difference — it wasn't; the notebook page's
+    own chrome is English even on this Spanish-content account. The
+    actual blocker was the colon, which neither prior regex accounted
+    for. Also still accepts the plain "Location 100-105" shape (no
+    colon) since that's what My Clippings.txt itself uses, and Spanish
+    keywords in case another account's notebook page does localize.
+
+    Amazon also comma-groups large numbers ("Location:\xa01,032"), which a
+    plain digits-only pattern would silently truncate to 1 rather than fail
+    loudly — this accepts digit groups and strips commas before int().
 
     Returns (page, location_start, location_end).
     """
@@ -129,14 +137,18 @@ def _parse_location_header(header_text: str) -> tuple[Optional[int], Optional[in
     loc_start: Optional[int] = None
     loc_end: Optional[int] = None
 
-    page_match = re.search(r"(?:[Pp]age|[Pp]ágina)\s+(\d+)", header_text)
-    if page_match:
-        page = int(page_match.group(1))
+    number = r"(\d[\d,]*)"
 
-    loc_match = re.search(r"(?:[Ll]ocation|[Pp]osición|[Uu]bicación)\s+(\d+)(?:\s*-\s*(\d+))?", header_text)
+    page_match = re.search(rf"(?:[Pp]age|[Pp]ágina):?\s*{number}", header_text)
+    if page_match:
+        page = int(page_match.group(1).replace(",", ""))
+
+    loc_match = re.search(
+        rf"(?:[Ll]ocation|[Pp]osición|[Uu]bicación):?\s*{number}(?:\s*-\s*{number})?", header_text
+    )
     if loc_match:
-        loc_start = int(loc_match.group(1))
-        loc_end = int(loc_match.group(2)) if loc_match.group(2) else loc_start
+        loc_start = int(loc_match.group(1).replace(",", ""))
+        loc_end = int(loc_match.group(2).replace(",", "")) if loc_match.group(2) else loc_start
 
     return page, loc_start, loc_end
 
@@ -145,6 +157,23 @@ def _parse_author(raw: str) -> Optional[str]:
     """Strip 'By: ' prefix that Amazon prepends to author lines."""
     cleaned = re.sub(r"^[Bb]y:\s*", "", raw.strip()).strip()
     return cleaned or None
+
+
+# Verified live: Amazon's own notebook page DOM has the "note" element
+# wrapped in literal `<!-- FIX HERE!! -->` / `<!-- END HERE!! -->` comments
+# for certain annotations — this is a known bug on Amazon's side, not a
+# selector problem here. It surfaces on short, dictionary-lookup-style
+# highlights (a single word, a short quoted term) and populates the note
+# with either a dictionary definition fragment or a stray UI action label
+# instead of anything the user wrote. A definition fragment can't be
+# reliably told apart from a genuine short note by text alone, but a bare
+# UI action label can be — so this only filters the latter, deliberately
+# conservative denylist.
+_NOTE_UI_ARTIFACTS = {"buscar", "search", "compartir", "share", "eliminar", "delete", "editar", "edit"}
+
+
+def _is_note_ui_artifact(note_text: Optional[str]) -> bool:
+    return bool(note_text) and note_text.strip().casefold() in _NOTE_UI_ARTIFACTS
 
 
 # ---------------------------------------------------------------------------
@@ -354,6 +383,9 @@ def scrape_highlights(*, headed: bool = False, reset_session: bool = False) -> l
                     if not highlight_text:
                         continue
 
+                    if _is_note_ui_artifact(note_text):
+                        note_text = None
+
                     page_num, loc_start, loc_end = _parse_location_header(header_text)
                     ch = _kindle_content_hash(book_title, author, highlight_text, note_text, loc_start, loc_end)
 
@@ -434,27 +466,31 @@ def import_kindle_highlights(raw_records: list[dict]) -> dict:
                     books_created += 1
 
                 # ── Dedup 1: exact kindle_notebook hash (same source re-run) ──
-                exists_same_source = session.exec(
+                # content_hash deliberately doesn't include `page` (only
+                # location), so a book with page-only headers and no
+                # location (e.g. a fixed-layout edition) hashes identically
+                # whether or not page was actually captured — this can
+                # still be a backfill candidate below, not just a skip.
+                matching_highlight = session.exec(
                     select(Highlight).where(
                         Highlight.book_id      == book.id,
                         Highlight.source       == SOURCE,
                         Highlight.content_hash == record["content_hash"],
                     )
                 ).first()
-                if exists_same_source:
-                    records_skipped += 1
-                    continue
 
-                # ── Dedup 2: cross-source — skip if same text already exists ──
-                # (the my_clippings version is richer: it has page/location/date)
-                norm_incoming = normalize_identity(record["content"])
-                all_book_highlights = session.exec(
-                    select(Highlight).where(Highlight.book_id == book.id)
-                ).all()
-                matching_highlight = next(
-                    (h for h in all_book_highlights if normalize_identity(h.content or "") == norm_incoming),
-                    None,
-                )
+                if matching_highlight is None:
+                    # ── Dedup 2: cross-source — same text already exists ──
+                    # (the my_clippings version is richer: it has page/location/date)
+                    norm_incoming = normalize_identity(record["content"])
+                    all_book_highlights = session.exec(
+                        select(Highlight).where(Highlight.book_id == book.id)
+                    ).all()
+                    matching_highlight = next(
+                        (h for h in all_book_highlights if normalize_identity(h.content or "") == norm_incoming),
+                        None,
+                    )
+
                 if matching_highlight is not None:
                     # Backfill metadata an earlier scrape couldn't capture
                     # (e.g. page/location, before the header-parsing regex
